@@ -1,0 +1,24 @@
+~*
+.DS_Store
+*.swp
+.idea/
+.vscode/
+
+*.pyc
+
+.coverage
+.coverage.*
+.cache
+.pytest_cache
+pip-wheel-metadata/
+
+.ipynb_checkpoints/
+
+dist/*
+build/*
+*.egg-info
+MANIFEST
+.eggs/
+
+# Ignore the set configuration file
+config.yml
