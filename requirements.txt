@@ -4,11 +4,11 @@ xarray>=0.15.1
 pint>=0.13
 metpy>=0.12.1
 cartopy==0.17.0
+xesmf>=0.3.0
 pandas>=1.0
 netCDF4>=1.5.3
 zarr>=2.4
 arm-pyart>=1.11.1
 wradlib>=1.7.3
 requests>=0.24.0
-numba>=0.50.1
 dask>=2.20.0
