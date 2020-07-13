@@ -20,5 +20,7 @@ build/*
 MANIFEST
 .eggs/
 
-# Ignore the set configuration file
-config.yml
+# Ignore intermediate results from full_application
+examples/full_application/batches/
+examples/full_application/output/
+
