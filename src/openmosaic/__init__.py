@@ -3,9 +3,4 @@
 # SPDX-License-Identifier: Apache-2.0
 """NEXRAD mosaic creation and feature extraction."""
 
-import numpy as np
-
-
-def hello_world():
-    """Test that tests and project configuration work."""
-    return np.mean([41, 43])
+from .utils import hello_world
