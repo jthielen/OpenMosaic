@@ -24,3 +24,5 @@ MANIFEST
 examples/full_application/batches/
 examples/full_application/output/
 
+# Ignore experimentation directory
+exper/
