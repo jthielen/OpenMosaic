@@ -3,7 +3,7 @@ line-length = 95
 include = '\.pyi?$'
 
 [build-system]
-requires = ["setuptools>=41", "wheel", "setuptools_scm[toml]>=3.4.3"]
+requires = ["setuptools>=41", "wheel", "setuptools_scm[toml]>=3.4.3", "cython"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools_scm]

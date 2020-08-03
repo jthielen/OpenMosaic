@@ -5,7 +5,9 @@
 
 import numpy as np
 
+from .vendored import map_gates_to_grid
 
 def hello_world():
     """Test that tests and project configuration work."""
     return np.mean([41, 43])
+

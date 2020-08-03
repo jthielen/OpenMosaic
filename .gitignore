@@ -5,6 +5,8 @@
 .vscode/
 
 *.pyc
+*.so
+*.c
 
 .coverage
 .coverage.*
