@@ -180,7 +180,7 @@ def map_gates_to_grid(
             gate_timedelta = np.zeros(radar.nrays)
         else:
             gate_timedelta = np.array([
-                (t - analysis_time.replace(tzinfo=None)).seconds
+                (t - analysis_time.replace(tzinfo=None)).total_seconds()
                 for t in num2date(radar.time['data'], radar.time['units'])
             ])
 

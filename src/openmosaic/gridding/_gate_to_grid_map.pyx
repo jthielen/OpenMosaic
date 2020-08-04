@@ -22,7 +22,7 @@ cdef float L2 = 2.25e10  # GridRad Length Scale Squared [m^2]
 cdef float TAU2 = 2.25e4  # GridRad Time Scale Squared [s^2]
 cdef float R_CUTOFF = 3.0e5  # GridRad Range Cutoff [m]
 cdef float T_CUTOFF = 228.0  # GridRad Timedelta Cutoff [s]
-cdef float DEPTH_CUTOFF = 1.5e3  # GridRad Depth Cutoff [m]
+cdef float DEPTH_CUTOFF = 1.25e3  # GridRad Depth Cutoff [m]
 
 # This definition can be added to a .pxd file so others can defined fast
 # RoI functions
@@ -355,6 +355,7 @@ cdef class GateToGridMapper:
             # Get the xi, yi of desired weight
             x_argmin = -1
             y_argmin = -1
+            min_dist2 = 1e30
             for xi in range(x_min, x_max+1):
                 for yi in range(y_min, y_max+1):
                     xg = self.x_step * xi
@@ -362,22 +363,20 @@ cdef class GateToGridMapper:
                     
                     dist = (xg-x)*(xg-x) + (yg-y)*(yg-y)
                     
-                    if dist >= roi2:
+                    if dist > roi2:
                         continue
                     
-                    if dist < self.min_dist2[0, yi, xi, 0]:
-                        self.min_dist2[0, yi, xi, 0] = dist
+                    if dist < min_dist2:
+                        min_dist2 = dist
                         x_argmin = xi
                         y_argmin = yi
+
+            if x_argmin == -1:
+                return 0
 
             for zi in range(z_min, z_max+1):
                 zg = self.z_step * zi
                 
-                dist2 = (xg-x)*(xg-x) + (yg-y)*(yg-y) + (zg-z)*(zg-z)
-
-                if dist2 > roi2:
-                    continue
-
                 if fabs(zg - z) > DEPTH_CUTOFF:
                     continue
 
