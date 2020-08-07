@@ -9,9 +9,10 @@ import re
 import cftime
 import geopandas as gpd
 import numpy as np
+import pandas as pd
 import pyart
 import shapely
-import tqdm
+from tqdm import tqdm
 
 
 l2_datetime_pattern = re.compile(
@@ -69,9 +70,9 @@ def create_s3_file_list(nexrad_bucket, radar_site_ids, analysis_time, vol_search
         NEXRAD Level II S3 Bucket object
     radar_site_ids : iterable
         Iterable of site NEXRAD site ids to query
-    analysis_time : numpy.datetime64
+    analysis_time : pandas.Timestamp
         Datetime of analysis
-    vol_search_interval : numpy.timedelta64
+    vol_search_interval : pandas.Timedelta
         Maximum offset from analysis time for which to include files
     
     Returns
@@ -80,7 +81,7 @@ def create_s3_file_list(nexrad_bucket, radar_site_ids, analysis_time, vol_search
         List of S3 file keys for Level II files of interest
     """
     dates_to_search = np.unique([
-        t.astype('datetime64[D]') for t in [
+        t.floor('D') for t in [
             analysis_time - vol_search_interval,
             analysis_time,
             analysis_time + vol_search_interval
@@ -98,7 +99,7 @@ def create_s3_file_list(nexrad_bucket, radar_site_ids, analysis_time, vol_search
                 match = l2_datetime_pattern.search(f)
                 if match and (
                     analysis_time - vol_search_interval
-                    <= np.datetime64("{Y}-{m}-{d}T{H}:{M}:{S}".format(**match.groupdict()))
+                    <= pd.Timestamp("{Y}-{m}-{d}T{H}:{M}:{S}".format(**match.groupdict()))
                     <= analysis_time + vol_search_interval
                 ):
                     file_keys.append(f)
@@ -116,9 +117,9 @@ def load_nexrad_data(file_keys, nexrad_bucket, cache_dir, analysis_time, sweep_i
         NEXRAD Level II S3 Bucket object
     cache_dir : str
         Directory for Level II file cache
-    analysis_time : numpy.datetime64
+    analysis_time : pandas.Timestamp
         Datetime of analysis
-    sweep_interval : numpy.timedelta64
+    sweep_interval : pandas.Timedelta
         Maximum offset from analysis time for which to include sweeps
 
     Returns
@@ -130,7 +131,7 @@ def load_nexrad_data(file_keys, nexrad_bucket, cache_dir, analysis_time, sweep_i
     for k in tqdm(file_keys):
         f = cache_dir + k.split("/")[-1]
         if not os.path.isfile(f):
-            nexrad_bucket.download_file(f)
+            nexrad_bucket.download_file(k, f)
         radar = pyart.io.read_nexrad_archive(f)
         sweep_time_offsets = [np.median(radar.time['data'][s:e]) for s, e in radar.iter_start_end()]
         sweep_times = cftime.num2date(sweep_time_offsets, radar.time['units'])

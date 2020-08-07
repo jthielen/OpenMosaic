@@ -166,7 +166,7 @@ def generate_3d_radar_grid(
         (
             (z0, z0 + (nz - 1) * dz),
             (params['y_min'], params['y_max']),
-            (params['x_min'], params['x_min'])
+            (params['x_min'], params['x_max'])
         ),
         grid_origin=(lat_origin, lon_origin),
         grid_origin_alt=0,
@@ -189,7 +189,7 @@ def generate_3d_radar_grid(
     ds = ds.assign_coords(
         z=xr.DataArray(
             np.arange(nz) * dz + z0,
-            dims=('z',)
+            dims=('z',),
             name='z',
             attrs={
                 'standard_name': 'altitude',
@@ -210,7 +210,7 @@ def generate_3d_radar_grid(
             field: xr.Variable(
                 ('z', 'y', 'x'),
                 grids[field],
-                {k: v for k, v in radars[0][field].items() if k != 'data'}
+                {k: v for k, v in radars[0].fields[field].items() if k in ['units', 'standard_name', 'long_name']}
             )
             for field in fields
         }
