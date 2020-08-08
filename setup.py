@@ -10,7 +10,7 @@ setup(
     ext_modules=[
         Extension(
             'openmosaic.gridding._gate_to_grid_map',
-            sources=['src/openmosaic/gridding/_gate_to_grid_map.pyx']
+            sources=['src/openmosaic/gridding/_map_gates_to_subgrid.pyx']
         )
     ]
 )
