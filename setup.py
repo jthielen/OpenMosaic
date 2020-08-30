@@ -10,7 +10,17 @@ setup(
     ext_modules=[
         Extension(
             'openmosaic.gridding._gate_to_grid_map',
-            sources=['src/openmosaic/gridding/_gate_to_grid_map.pyx']
+            sources=[
+                'src/openmosaic/gridding/_gate_to_grid_map.pyx'
+            ],
+            libraries=['m']
+        ),
+        Extension(
+            'openmosaic._c_routines',
+            sources=[
+                'src/openmosaic/_c_routines.pyx'
+            ],
+            libraries=['m']
         )
     ]
 )

@@ -1,3 +1,4 @@
+#cython: language_level=3
 """
 Cython classes and functions for efficient mapping of radar gates to
 a uniform grid.
