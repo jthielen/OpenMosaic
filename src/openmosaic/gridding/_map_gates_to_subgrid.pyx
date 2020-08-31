@@ -51,8 +51,8 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 """
 
-from libc.math import sqrt, exp, ceil, floor, sin, cos, tan, asin, fabs
-from cython.view import array as cvarray
+from libc.math cimport sqrt, exp, ceil, floor, sin, cos, tan, asin, fabs
+from cython.view cimport array as cvarray
 
 cimport cython
 import numpy as np
@@ -223,7 +223,7 @@ cdef class GatesToSubgridMapper:
     
 
     def __init__(self, tuple subgrid_shape, tuple subgrid_starts,
-                 tuple grid_steps, float[:, :, :, ::1] subgrid_sum,
+                 tuple subgrid_steps, float[:, :, :, ::1] subgrid_sum,
                  float[:, :, :, ::1] subgrid_wsum):
         """ initialize. """
 

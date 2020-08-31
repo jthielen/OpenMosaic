@@ -63,7 +63,7 @@ from pyart.core.transforms import geographic_to_cartesian
 from pyart.filters import GateFilter, moment_based_gate_filter
 
 from ._gate_to_grid_map import GateToGridMapper
-from ._gate_to_grid_map import RoIFunction, ConstantRoI, DistBeamRoI, DistRoI
+from ._map_gates_to_subgrid import RoIFunction, ConstantRoI, DistBeamRoI, DistRoI
 
 
 def map_gates_to_grid(
@@ -128,7 +128,7 @@ def map_gates_to_grid(
             grid_origin_alt = np.mean(radars[0].altitude['data'])
 
     gatefilters = _parse_gatefilters(gatefilters, radars)
-    cy_weighting_function = _detemine_cy_weighting_func(weighting_function)
+    cy_weighting_function = _determine_cy_weighting_func(weighting_function)
     projparams = _find_projparams(grid_origin, radars, grid_projection)
     fields = _determine_fields(fields, radars)
     grid_starts, grid_steps = _find_grid_params(grid_shape, grid_limits)
@@ -204,7 +204,7 @@ def map_gates_to_grid(
     return grids
 
 
-def _detemine_cy_weighting_func(weighting_function):
+def _determine_cy_weighting_func(weighting_function):
     """ Determine cython weight function value. """
     if weighting_function.upper() == 'GRIDRAD':
         cy_weighting_function = 4

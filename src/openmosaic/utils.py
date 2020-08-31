@@ -7,6 +7,7 @@ import os
 import re
 
 import cftime
+import dask
 import geopandas as gpd
 import numpy as np
 import pandas as pd
@@ -106,6 +107,22 @@ def create_s3_file_list(nexrad_bucket, radar_site_ids, analysis_time, vol_search
     return file_keys
 
 
+@dask.delayed
+def _load_single_site(f, cache_dir, analysis_time, sweep_interval):
+    radar = pyart.io.read_nexrad_archive(f)
+    sweep_time_offsets = [np.median(radar.time['data'][s:e]) for s, e in radar.iter_start_end()]
+    sweep_times = cftime.num2date(sweep_time_offsets, radar.time['units'])
+    valid_sweep_ids = [
+        i for i, t in enumerate(sweep_times) if (
+            analysis_time - sweep_interval
+            <= t
+            <= analysis_time + sweep_interval
+        )
+    ]
+    if valid_sweep_ids:
+        return radar.extract_sweeps(valid_sweep_ids)
+
+
 def load_nexrad_data(file_keys, nexrad_bucket, cache_dir, analysis_time, sweep_interval):
     """Load select sweeps of NEXRAD radar files into memory from S3 bucket using a cache.
     
@@ -128,20 +145,10 @@ def load_nexrad_data(file_keys, nexrad_bucket, cache_dir, analysis_time, sweep_i
         List of subsetted Radars
     """
     radars = []
-    for k in tqdm(file_keys):
+    for k in file_keys:
         f = cache_dir + k.split("/")[-1]
         if not os.path.isfile(f):
+            warnings.warn(f"Downloading {f}")
             nexrad_bucket.download_file(k, f)
-        radar = pyart.io.read_nexrad_archive(f)
-        sweep_time_offsets = [np.median(radar.time['data'][s:e]) for s, e in radar.iter_start_end()]
-        sweep_times = cftime.num2date(sweep_time_offsets, radar.time['units'])
-        valid_sweep_ids = [
-            i for i, t in enumerate(sweep_times) if (
-                analysis_time - sweep_interval
-                <= t
-                <= analysis_time + sweep_interval
-            )
-        ]
-        if valid_sweep_ids:
-            radars.append(radar.extract_sweeps(valid_sweep_ids))
-    return radars
+        radars.append(_load_single_site(f, cache_dir, analysis_time, sweep_interval))
+    return [radar for radar in dask.compute(*radars) if radar is not None]
