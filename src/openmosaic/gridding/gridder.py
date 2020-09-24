@@ -317,13 +317,15 @@ class Gridder:
 
         return grid_params
 
-    def prepare_radars(self, radars, cache_dir=None, r_max=3.0e5):
+    def prepare_radars(self, radars, radar_coords, cache_dir=None, r_max=3.0e5):
         """Determine gate coordinates and subgrids on which to map each radar.
 
         Parameters
         ----------
         radars : iterable of pyart.core.radar.Radar
             Collection of (already subsetted by sweep time and range) Py-ART Radar objects
+        radar_coords : iterable of tuple
+            List of x,y coord pairs (in projection) defining radar location
         cache_dir : str
             Path to cache directory (used to save coord transform regression models for each
             radar site)
@@ -338,18 +340,16 @@ class Gridder:
 
         self.radars = []
         radar_site_ids = []
-        for radar in radars:
+        for i, radar in enumerate(radars):
             # Define projection objects
             crs_kwargs = {
                 'proj': 'aeqd',
                 'lat_0': radar.latitude['data'].item(),
                 'lon_0': radar.longitude['data'].item()
             }
-            radar_crs = pyproj.CRS(crs_kwargs)
-            transformer = pyproj.Transformer.from_crs(radar_crs, self.crs)
 
             # Determine subset of grid that this radar will map data on to
-            x_radar, y_radar = transformer.transform(0, 0)
+            x_radar, y_radar = radar_coords[i]
             # Inclusive index of destination grid point to the left of left-most influence of
             # radar data
             xi_min = max(
@@ -408,7 +408,6 @@ class Gridder:
                 'radar': radar,
                 'x_radar': x_radar,
                 'y_radar': y_radar,
-                'transformer': transformer,
                 'xi_min': xi_min,
                 'xi_max': xi_max,
                 'yi_min': yi_min,
