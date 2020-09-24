@@ -67,10 +67,10 @@ cdef float azi_shear_for_kernel_uniform_weight(
                        \right]
     """
 
-    cdef float sum_r, sum_theta, sum_r_sqr, sum_theta_sqr, sum_r_theta
-    cdef float sum_u, sum_r_u, sum_theta_u
-    cdef float u, r_dist, theta_dist
-    cdef float D
+    cdef double sum_r, sum_theta, sum_r_sqr, sum_theta_sqr, sum_r_theta
+    cdef double sum_u, sum_r_u, sum_theta_u
+    cdef double u, r_dist, theta_dist
+    cdef double D
     cdef int i, j
 
     sum_r = 0
@@ -100,18 +100,20 @@ cdef float azi_shear_for_kernel_uniform_weight(
 
     # Compute determinant
     D = (
-        sum_r_theta * sum_r_theta * m * n
-        + sum_theta_sqr * sum_r * sum_r
-        + sum_theta * sum_theta * sum_r_sqr
-        - 2 * sum_r * sum_theta * sum_r_theta
-        - sum_r_sqr * sum_theta_sqr * m * n
+        - sum_r_theta * sum_r_theta * m * n
+        - sum_theta_sqr * sum_r * sum_r
+        - sum_theta * sum_theta * sum_r_sqr
+        + 2 * sum_r * sum_theta * sum_r_theta
+        + sum_r_sqr * sum_theta_sqr * m * n
     )
+
+    #return r
 
     return (
         (
-            sum_r_u * (sum_r_theta * m * n - sum_r * sum_theta)
-            - sum_theta_u * (sum_theta_sqr * m * n - sum_theta * sum_theta)
-            + sum_u * (sum_theta_sqr * sum_r - sum_r_theta * sum_theta)
+            sum_r_u * (sum_r_sqr * m * n - sum_theta * sum_theta)
+            + sum_theta_u * (sum_r * sum_theta - sum_r_theta * m * n)
+            + sum_u * (sum_r_theta * sum_theta_sqr - sum_r * sum_theta_sqr)
         ) / D
     )
 
@@ -172,10 +174,10 @@ cdef float div_shear_for_kernel_uniform_weight(
                        \right]
     """
 
-    cdef float sum_r, sum_theta, sum_r_sqr, sum_theta_sqr, sum_r_theta
-    cdef float sum_u, sum_r_u, sum_theta_u
-    cdef float u, r_dist, theta_dist
-    cdef float D
+    cdef double sum_r, sum_theta, sum_r_sqr, sum_theta_sqr, sum_r_theta
+    cdef double sum_u, sum_r_u, sum_theta_u
+    cdef double u, r_dist, theta_dist
+    cdef double D
     cdef int i, j
 
     sum_r = 0
@@ -205,18 +207,18 @@ cdef float div_shear_for_kernel_uniform_weight(
 
     # Compute determinant
     D = (
-        sum_r_theta * sum_r_theta * m * n
-        + sum_theta_sqr * sum_r * sum_r
-        + sum_theta * sum_theta * sum_r_sqr
-        - 2 * sum_r * sum_theta * sum_r_theta
-        - sum_r_sqr * sum_theta_sqr * m * n
+        - sum_r_theta * sum_r_theta * m * n
+        - sum_theta_sqr * sum_r * sum_r
+        - sum_theta * sum_theta * sum_r_sqr
+        + 2 * sum_r * sum_theta * sum_r_theta
+        + sum_r_sqr * sum_theta_sqr * m * n
     )
 
     return (
         (
-            - sum_r_u * (sum_r_sqr * m * n - sum_r * sum_r)
-            + sum_theta_u * (sum_r_theta * m * n - sum_r * sum_theta)
-            - sum_u * (sum_r_theta * sum_r - sum_r_sqr * sum_theta)
+            sum_r_u * (sum_r * sum_theta - sum_r_theta * m * n)
+            + sum_theta_u * (sum_r_sqr * m * n - sum_r * sum_r)
+            + sum_u * (sum_r_theta * sum_r - sum_r_sqr * sum_theta)
         ) / D
     )
 

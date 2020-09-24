@@ -98,9 +98,9 @@ def compute_radial_divergence(
         div_shear[radar.get_slice(nsweep), :] = div_shear_uniform_weight(
             r.shape[0],
             theta.shape[0],
-            r,
-            theta,
-            vel_field,
+            r.astype('float32'),
+            theta.astype('float32'),
+            vel_field.astype('float32'),
             azi_width,
             r_depth,
             azi_max_rays
