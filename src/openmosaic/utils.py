@@ -110,7 +110,12 @@ def create_s3_file_list(nexrad_bucket, radar_site_ids, analysis_time, vol_search
 
 @dask.delayed
 def _load_single_site(f, cache_dir, analysis_time, sweep_interval):
-    radar = pyart.io.read_nexrad_archive(f)
+    try:
+        radar = pyart.io.read_nexrad_archive(f)
+    except:
+        warnings.warn(f"Cannot read file {f}")
+        return None
+
     sweep_time_offsets = [np.median(radar.time['data'][s:e]) for s, e in radar.iter_start_end()]
     sweep_times = cftime.num2date(sweep_time_offsets, radar.time['units'])
     valid_sweep_ids = [
@@ -121,7 +126,12 @@ def _load_single_site(f, cache_dir, analysis_time, sweep_interval):
         )
     ]
     if valid_sweep_ids:
-        return radar.extract_sweeps(valid_sweep_ids)
+        new_radar = radar.extract_sweeps(valid_sweep_ids)
+        del radar
+        return new_radar
+    else:
+        del radar
+        return None
 
 
 def load_nexrad_data(file_keys, nexrad_bucket, cache_dir, analysis_time, sweep_interval):

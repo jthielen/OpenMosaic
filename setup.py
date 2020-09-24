@@ -22,6 +22,13 @@ setup(
             ],
             libraries=['m']
         ),
+        Extension(
+            'openmosaic._c_routines',
+            sources=[
+                'src/openmosaic/_c_routines.pyx'
+            ],
+            libraries=['m']
+        )
     ]
 )
 
