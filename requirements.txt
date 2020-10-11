@@ -12,3 +12,4 @@ arm_pyart>=1.11.1
 wradlib>=1.7.3
 requests>=0.24.0
 dask>=2.20.0
+boto3
