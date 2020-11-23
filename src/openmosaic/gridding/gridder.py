@@ -536,7 +536,7 @@ class Gridder:
                 ], dtype='float32')
 
             # Add args to list to be applied to map_gates_to_subgrid
-            subgrid_args.append(
+            subgrid_args.append((
                 subgrid_shape,
                 subgrid_starts,
                 subgrid_steps,
@@ -552,7 +552,7 @@ class Gridder:
                 self.grid_params['z_max'],
                 roi_func_args,
                 cy_weighting_function
-            )
+            ))
             
         # Run the computation
         if self.pool is None:
