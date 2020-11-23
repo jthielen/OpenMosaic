@@ -180,6 +180,83 @@ def map_gates_to_subgrid(
     }
 
 
+def prepare_single_radar(i, radar, radar_coords, grid_params, r_max, cf_attrs, cache_dir):
+    # Define projection objects
+    crs_kwargs = {
+        'proj': 'aeqd',
+        'lat_0': radar.latitude['data'].item(),
+        'lon_0': radar.longitude['data'].item()
+    }
+
+    # Determine subset of grid that this radar will map data on to
+    x_radar, y_radar = radar_coords[i]
+    # Inclusive index of destination grid point to the left of left-most influence of
+    # radar data
+    xi_min = max(
+        0,
+        int((x_radar - r_max - grid_params['x_min']) / grid_params['dx'])
+    )
+    # Exclusive index (upper) of destination grid point to the right of the right-most
+    # influence of radar data
+    xi_max = min(
+        grid_params['nx'],
+        int(
+            (x_radar + r_max - grid_params['x_min'])
+            / grid_params['dx']
+        ) + 2
+    )
+    # Inclusive index of destination grid point below the bottom-most influence of
+    # radar data
+    yi_min = max(
+        0,
+        int((y_radar - r_max - grid_params['y_min']) / grid_params['dy'])
+    )
+    # Exclusive index (upper) of destination grid point above the top-most
+    # influence of radar data
+    yi_max = min(
+        grid_params['ny'],
+        int(
+            (y_radar + r_max - grid_params['y_min'])
+            / grid_params['dy']
+        ) + 2
+    )
+    # Sanity check that we didn't exceed our bounds
+    if (
+        xi_max <= 0
+        or xi_min >= grid_params['nx']
+        or yi_max <= 0
+        or yi_min >= grid_params['ny']
+    ):
+        warnings.warn("Radar included outside of maximum range box. Skipping.")
+        return
+
+    # Prep coordinates of gates on destination grid
+    site_id = radar.metadata['instrument_name']
+    gate_dest_xy = radar_coords_to_grid_coords(
+        radar.gate_x['data'],
+        radar.gate_y['data'],
+        site_id=site_id,
+        radar_crs_kwargs=crs_kwargs,
+        target_crs_cf_attrs=cf_attrs,
+        wait_for_cache=False,  # TODO validate assumption
+        cache_dir=cache_dir
+    )
+    gate_dest_z = radar.gate_altitude['data']
+    
+    return {
+        'site_id': site_id,
+        'radar': radar,
+        'x_radar': x_radar,
+        'y_radar': y_radar,
+        'xi_min': xi_min,
+        'xi_max': xi_max,
+        'yi_min': yi_min,
+        'yi_max': yi_max,
+        'gate_dest_x': gate_dest_xy[0],
+        'gate_dest_y': gate_dest_xy[1],
+        'gate_dest_z': gate_dest_z
+    }
+
 class Gridder:
     """Map gates from one or more radars to a common grid.
 
@@ -331,89 +408,38 @@ class Gridder:
         if cache_dir is not None:
             self.cache_dir = cache_dir
 
-        self.radars = []
-        radar_site_ids = []
-        def prepare_single_radar(i, radar):
-            # Define projection objects
-            crs_kwargs = {
-                'proj': 'aeqd',
-                'lat_0': radar.latitude['data'].item(),
-                'lon_0': radar.longitude['data'].item()
-            }
-
-            # Determine subset of grid that this radar will map data on to
-            x_radar, y_radar = radar_coords[i]
-            # Inclusive index of destination grid point to the left of left-most influence of
-            # radar data
-            xi_min = max(
-                0,
-                int((x_radar - r_max - self.grid_params['x_min']) / self.grid_params['dx'])
-            )
-            # Exclusive index (upper) of destination grid point to the right of the right-most
-            # influence of radar data
-            xi_max = min(
-                self.grid_params['nx'],
-                int(
-                    (x_radar + r_max - self.grid_params['x_min'])
-                    / self.grid_params['dx']
-                ) + 2
-            )
-            # Inclusive index of destination grid point below the bottom-most influence of
-            # radar data
-            yi_min = max(
-                0,
-                int((y_radar - r_max - self.grid_params['y_min']) / self.grid_params['dy'])
-            )
-            # Exclusive index (upper) of destination grid point above the top-most
-            # influence of radar data
-            yi_max = min(
-                self.grid_params['ny'],
-                int(
-                    (y_radar + r_max - self.grid_params['y_min'])
-                    / self.grid_params['dy']
-                ) + 2
-            )
-            # Sanity check that we didn't exceed our bounds
-            if (
-                xi_max <= 0
-                or xi_min >= self.grid_params['nx']
-                or yi_max <= 0
-                or yi_min >= self.grid_params['ny']
-            ):
-                warnings.warn("Radar included outside of maximum range box. Skipping.")
-                return
-
-            # Prep coordinates of gates on destination grid
-            site_id = radar.metadata['instrument_name']
-            gate_dest_xy = radar_coords_to_grid_coords(
-                radar.gate_x['data'],
-                radar.gate_y['data'],
-                site_id=site_id,
-                radar_crs_kwargs=crs_kwargs,
-                target_crs_cf_attrs=self.cf_attrs,
-                wait_for_cache=(site_id in radar_site_ids),
-                cache_dir=self.cache_dir
-            )
-            gate_dest_z = radar.gate_altitude['data']
-            
-            radar_site_ids.append(site_id)
-            self.radars.append({
-                'radar': radar,
-                'x_radar': x_radar,
-                'y_radar': y_radar,
-                'xi_min': xi_min,
-                'xi_max': xi_max,
-                'yi_min': yi_min,
-                'yi_max': yi_max,
-                'gate_dest_x': gate_dest_xy[0],
-                'gate_dest_y': gate_dest_xy[1],
-                'gate_dest_z': gate_dest_z
-            })
         if self.pool is None:
+            self.radars = []
             for i, radar in enumerate(radars):
-                prepare_single_radar(i, radar)
+                self.radars.append(
+                    prepare_single_radar(
+                        i,
+                        radar,
+                        radar_coords,
+                        self.grid_params,
+                        r_max,
+                        self.cf_attrs,
+                        self.cache_dir
+                    )
+                )
         else:
-            self.pool.starmap(prepare_single_radar, enumerate(radars))
+            self.radars = list(
+                self.pool.starmap(
+                    prepare_single_radar,
+                    (
+                        (
+                            i,
+                            radar,
+                            radar_coords,
+                            self.grid_params,
+                            r_max,
+                            self.cf_attrs,
+                            self.cache_dir
+                        )
+                        for i, radar in enumerate(radars)
+                    )
+                )
+            )
 
     def map_gates_to_grid(
         self,
@@ -464,8 +490,8 @@ class Gridder:
 
         nfields = len(fields)
 
-        subgrids = []
-        def map_single_subgrid(radar, gatefilter):
+        subgrid_args = []
+        for radar, gatefilter in zip(self.radars, gatefilters):
             subgrid_shape = (
                 self.grid_params['nz'],
                 radar['yi_max'] - radar['yi_min'],
@@ -509,9 +535,8 @@ class Gridder:
                     for t in num2date(radar['radar'].time['data'], radar['radar'].time['units'])
                 ], dtype='float32')
 
-            # Delayed computation of mapping of this radar's gates to its subgrid values
-            # and weights
-            subgrids.append(map_gates_to_subgrid(
+            # Add args to list to be applied to map_gates_to_subgrid
+            subgrid_args.append(
                 subgrid_shape,
                 subgrid_starts,
                 subgrid_steps,
@@ -527,14 +552,15 @@ class Gridder:
                 self.grid_params['z_max'],
                 roi_func_args,
                 cy_weighting_function
-            ))
+            )
             
         # Run the computation
         if self.pool is None:
-            for radar, gatefilter in zip(self.radars, gatefilters):
-                map_single_subgrid(radar, gatefilter)
+            subgrids = []
+            for args in subgrid_args:
+                subgrids.append(map_gates_to_subgrid(*args))
         else:
-            self.pool.starmap(map_single_subgrid, zip(self.radars, gatefilters))
+            subgrids = list(self.pool.starmap(map_gates_to_subgrid, subgrid_args))
 
         # Sum the subgrids
         grid_shape = (self.grid_params['nz'], self.grid_params['ny'], self.grid_params['nx'], nfields)
