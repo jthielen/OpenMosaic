@@ -14,7 +14,6 @@ from joblib import dump, load
 import warnings
 
 from cftime import num2date
-import dask
 import numpy as np
 from pyart.core.radar import Radar
 from pyart.filters import GateFilter, moment_based_gate_filter
@@ -37,7 +36,6 @@ _grid_param_labels_y = ['ny', 'dy', 'y_min', 'y_max']
 _grid_param_labels_x = ['nx', 'dx', 'x_min', 'x_max']
 
 
-@dask.delayed
 def radar_coords_to_grid_coords(
     gate_radar_x,
     gate_radar_y,
@@ -58,9 +56,6 @@ def radar_coords_to_grid_coords(
     100 m within 300 km of the radar site (also, faster and signficantly less error than
     using pyproj.Proj from Py-ART's calcuated lat/lons).
 
-    This function used delayed evaluation with dask, so you must run the results with
-    dask.compute.
-    
     WARNING: If you change the destination grid, you must clear the cached regressions in the
     .regressions directory.
     """
@@ -133,7 +128,6 @@ def radar_coords_to_grid_coords(
     return np.stack([grid_x, grid_y], axis=0)
 
 
-@dask.delayed
 def map_gates_to_subgrid(
     subgrid_shape,
     subgrid_starts,
@@ -199,13 +193,15 @@ class Gridder:
     # Control params
     r_max = 3.0e5
 
-    def __init__(self, cf_projection, **grid_params):
+    def __init__(self, cf_projection, pool=None, **grid_params):
         """Set up Gridder by defining grid.
 
         Parameters
         ----------
         cf_projection : dict-like
             Dictionary of projection parameters as defined by the CF Conventions
+        pool : multiprocessing.Pool
+            Pool for multiprocessing parallelization where useful
         **grid_params
             Additional keyword arguments for controlling the grid points in the specified
             projected space. Four options for each dimension (z, y, x) are available, be sure
@@ -219,6 +215,7 @@ class Gridder:
         """
         self.cf_attrs = dict(cf_projection)
         self.crs = pyproj.CRS.from_cf(self.cf_attrs)
+        self.pool = pool
 
         self._assign_grid_params('x', {k: v for k, v in grid_params.items() if k in _grid_param_labels_x})
         self._assign_grid_params('y', {k: v for k, v in grid_params.items() if k in _grid_param_labels_y})
@@ -330,17 +327,13 @@ class Gridder:
             Path to cache directory (used to save coord transform regression models for each
             radar site)
 
-        Notes
-        -----
-        This should run quickly since the computation of coordinates is delayed using Dask.
-        Remember to run ``compute_coords`` afterwards
         """
         if cache_dir is not None:
             self.cache_dir = cache_dir
 
         self.radars = []
         radar_site_ids = []
-        for i, radar in enumerate(radars):
+        def prepare_single_radar(i, radar):
             # Define projection objects
             crs_kwargs = {
                 'proj': 'aeqd',
@@ -388,7 +381,7 @@ class Gridder:
                 or yi_min >= self.grid_params['ny']
             ):
                 warnings.warn("Radar included outside of maximum range box. Skipping.")
-                continue
+                return
 
             # Prep coordinates of gates on destination grid
             site_id = radar.metadata['instrument_name']
@@ -412,17 +405,15 @@ class Gridder:
                 'xi_max': xi_max,
                 'yi_min': yi_min,
                 'yi_max': yi_max,
-                'gate_dest_xy': gate_dest_xy,
+                'gate_dest_x': gate_dest_xy[0],
+                'gate_dest_y': gate_dest_xy[1],
                 'gate_dest_z': gate_dest_z
             })
-
-    def compute_coords(self):
-        """Run dask.compute on horizontal coordinates of radar gates."""
-        coords = dask.compute(*(radar['gate_dest_xy'] for radar in self.radars))
-        for i, radar in enumerate(self.radars):
-            radar['gate_dest_x'] = coords[i][0]
-            radar['gate_dest_y'] = coords[i][1]
-            del radar['gate_dest_xy']
+        if self.pool is None:
+            for i, radar in enumerate(radars):
+                prepare_single_radar(i, radar)
+        else:
+            self.pool.starmap(prepare_single_radar, enumerate(radars))
 
     def map_gates_to_grid(
         self,
@@ -474,7 +465,7 @@ class Gridder:
         nfields = len(fields)
 
         subgrids = []
-        for radar, gatefilter in zip(self.radars, gatefilters):
+        def map_single_subgrid(radar, gatefilter):
             subgrid_shape = (
                 self.grid_params['nz'],
                 radar['yi_max'] - radar['yi_min'],
@@ -538,8 +529,12 @@ class Gridder:
                 cy_weighting_function
             ))
             
-        # Run the computation on the subgrids
-        subgrids = tuple(dask.compute(*subgrids))
+        # Run the computation
+        if self.pool is None:
+            for radar, gatefilter in zip(self.radars, gatefilters):
+                map_single_subgrid(radar, gatefilter)
+        else:
+            self.pool.starmap(map_single_subgrid, zip(self.radars, gatefilters))
 
         # Sum the subgrids
         grid_shape = (self.grid_params['nz'], self.grid_params['ny'], self.grid_params['nx'], nfields)

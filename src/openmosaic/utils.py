@@ -134,6 +134,37 @@ def _load_single_site(f, cache_dir, analysis_time, sweep_interval):
         return None
 
 
+def download_nexrad_data(file_keys, nexrad_bucket, cache_dir):
+    """Download NEXRAD radar files from S3 bucket to a cache.
+    
+    Parameters
+    ----------
+    file_keys : iterable of str
+        S3 Bucket keys of Level II files of interest
+    nexrad_bucket : boto3.resources.factory.s3.Bucket
+        NEXRAD Level II S3 Bucket object
+    cache_dir : str
+        Directory for Level II file cache
+    analysis_time : pandas.Timestamp
+        Datetime of analysis
+    sweep_interval : pandas.Timedelta
+        Maximum offset from analysis time for which to include sweeps
+
+    Returns
+    -------
+    list of pyart.core.Radar
+        List of subsetted Radars
+    """
+    filepaths = []
+    for k in file_keys:
+        f = cache_dir + k.split("/")[-1]
+        if not os.path.isfile(f):
+            warnings.warn(f"Downloading {f}")
+            nexrad_bucket.download_file(k, f)
+        filepaths.append(f)
+    return filepaths
+
+
 def load_nexrad_data(file_keys, nexrad_bucket, cache_dir, analysis_time, sweep_interval):
     """Load select sweeps of NEXRAD radar files into memory from S3 bucket using a cache.
     
