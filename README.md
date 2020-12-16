@@ -1,12 +1,10 @@
 # OpenMosaic: Open-source and extensible NEXRAD mosaic creation in Python
 
-Detailed description to come...
+Multi-radar analyses from the NEXRAD WSR-88D network such as MRMS, MYRORRS, NOWrad, and GridRad are widely used products in the atmospheric sciences research community, especially in severe weather research. However, these existing products have particular spatial resolutions, domain coverages, analysis timesteps, product types, historical availabilities, and archive accessibilities that may not meet the needs of a particular given research problem. Additionally, most of these operational multi-radar mosaic products rely upon closed-source tools, making replication of these products for custom configurations difficult.
 
-Inspired by MRMS, MYRORSS, and GridRad/GridRad-Severe, but needed for the unique case availablity requirements of two projects at Iowa State University in the research group of Dr. Bill Gallus.
+By leveraging and extending the IO and gridding utilities of the open-source Python ARM Radar Toolkit (Py-ART), OpenMosaic establishes an extensible framework for the creation of NEXRAD mosaic products from freely-available Level II radar data. The core of OpenMosaic is its implementation of the 4D GridRad mosaicing algorithm that leverages dask for parallelization and scalability. Also included in OpenMosaic are utilities for scanning cloud data stores of Level II data, defining georeferenced output targets from storm report or other point data, batching processing jobs, calculating derived products such as azimuthal shear and echo classification, outputting CF-compliant datasets, and applying storm object identification and feature data extraction methods based on scikit-image and hagelslag.
 
-Loose planning guide: https://docs.google.com/document/d/1VnrKKWDuNhQ1pSlmCEBGHaRH1cvVUZBiYQo2JnloCXA/edit?usp=sharing
-
-Contact [Jon Thielen](https://github.com/jthielen) with questions.
+Development is ongoing, and feedback and contributions are welcome. Contact [Jon Thielen](https://github.com/jthielen) with questions.
 
 ## License Information
 
