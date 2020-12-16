@@ -96,11 +96,15 @@ def create_s3_file_list(radar_site_ids, analysis_time, vol_search_interval, buck
     file_keys = []
     for date in dates_to_search:
         for site_id in radar_site_ids:
+            s3_search = s3.list_objects_v2(
+                Bucket=bucket_name,
+                Prefix=date.strftime(f"%Y/%m/%d/{site_id}")
+            )
+            if 'Contents' not in s3_search:
+                warnings.warn(date.strftime(f"No files found for {site_id} on %Y-%m-%d"))
+                continue
             all_files_on_day = [
-                obj['Key'] for obj in s3.list_objects_v2(
-                    Bucket=bucket_name,
-                    Prefix=date.strftime(f"%Y/%m/%d/{site_id}")
-                )['Contents']
+                obj['Key'] for obj in s3_search['Contents']
             ]
             for f in all_files_on_day:
                 match = l2_datetime_pattern.search(f)
