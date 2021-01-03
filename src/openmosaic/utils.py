@@ -40,7 +40,7 @@ def get_nexrad_sites(geojson_file, crs):
     sites = gpd.read_file(geojson_file)
     sites = sites[sites["radarType"] == "NEXRAD"]
     sites['proj_geom'] = sites['geometry'].to_crs(crs)
-    return sites
+    return sites.set_index('siteID', drop=False)
 
 
 def filter_radar_sites(radar_sites, subbatch, r_max):

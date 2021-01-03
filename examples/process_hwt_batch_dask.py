@@ -6,11 +6,12 @@
 import argparse
 from itertools import product, repeat
 import logging
+import os
 import re
 from sqlite3 import dbapi2 as sql
 import warnings
 
-from dask.distributed import Client
+from dask.distributed import Client, wait
 import numpy as np
 import matplotlib.pyplot as plt
 import pandas as pd
@@ -20,11 +21,16 @@ import pyproj
 import boto3
 import pyart
 import cftime
+import shapely
+
+from openmosaic.gridding import Gridder, generate_rectangular_grid
+from openmosaic.utils import get_nexrad_sites
 
 
 # Initial parameters
 log = logging.getLogger(__name__)
 bucket_name = 'noaa-nexrad-level2'
+s3 = boto3.client('s3')
 l2_datetime_pattern = re.compile(
     r"(?:K[A-Z]{3})(?P<Y>[0-9]{4})(?P<m>[0-9]{2})(?P<d>[0-9]{2})_(?P<H>[0-9]{2})"
     r"(?P<M>[0-9]{2})(?P<S>[0-9]{2})"
@@ -36,9 +42,12 @@ def aggregate_to_dataset(fields, grid_params, cf_attrs, analysis_time, *subgrid_
     grid_shape = (grid_params['nz'], grid_params['ny'], grid_params['nx'], len(fields))
     grid_sum = np.zeros(grid_shape, dtype='float32')
     grid_wsum = np.zeros(grid_shape, dtype='float32')
+    field_metadata = {field: '' for field in fields}  # If no valid data, have to mock metadata values
     for subgrid in subgrid_data_and_weights:
-        grid_sum[:, subgrid['yi_min']:subgrid['yi_max'], subgrid['xi_min']:subgrid['xi_max'], :] += subgrid['sum']
-        grid_wsum[:, subgrid['yi_min']:subgrid['yi_max'], subgrid['xi_min']:subgrid['xi_max'], :] += subgrid['wsum']
+        if subgrid is not None:
+            field_metadata = subgrid['field_metadata']
+            grid_sum[:, subgrid['yi_min']:subgrid['yi_max'], subgrid['xi_min']:subgrid['xi_max'], :] += subgrid['sum']
+            grid_wsum[:, subgrid['yi_min']:subgrid['yi_max'], subgrid['xi_min']:subgrid['xi_max'], :] += subgrid['wsum']
 
     # Apply the weighting and masking
     mweight = np.ma.masked_equal(grid_wsum, 0)
@@ -79,7 +88,7 @@ def aggregate_to_dataset(fields, grid_params, cf_attrs, analysis_time, *subgrid_
             field: xr.Variable(
                 ('z', 'y', 'x'),
                 grids[field],
-                subbatch['field_metadata'][field]
+                field_metadata[field]
             )
             for field in grids
         }
@@ -96,6 +105,15 @@ def post_ops(dataset):
     Currently only supports column-maximum reflectivity calculations!
     """
     return dataset.max('z').drop_vars(['lon', 'lat'])
+
+
+def download_nexrad_file(file_key, bucket_name='noaa-nexrad-level2'):
+    s3 = boto3.client('s3')
+    f = temp_l2_dir + file_key.split("/")[-1]
+    if not os.path.isfile(f):
+        log.info(f"Downloading {f}")
+        s3.download_file(bucket_name, file_key, f)
+    return f
 
 
 if __name__ == '__main__':
@@ -173,7 +191,9 @@ if __name__ == '__main__':
     cur = con.cursor()
 
     cf_attrs = {r['index']: maybe_float(r['value']) for _, r in pd.read_sql_query("SELECT * FROM projection", con).iterrows()}
-
+    crs = pyproj.CRS.from_cf(cf_attrs)
+    proj = pyproj.Proj(crs)
+    
     # Output control parameters for reference
 
     print(f"Batch ID: {batch_id}")
@@ -195,6 +215,8 @@ if __name__ == '__main__':
 
     # Init records to base processing off of
     radar_sites = get_nexrad_sites(nexrad_file, crs)
+    radar_sites['x'] = radar_sites['proj_geom'].apply(lambda point: point.x)
+    radar_sites['y'] = radar_sites['proj_geom'].apply(lambda point: point.y)
 
     batches = pd.read_sql_query("SELECT * FROM batches", con, parse_dates=['datetime_first', 'datetime_last'])
     batch = batches.iloc[batch_id]
@@ -215,7 +237,7 @@ if __name__ == '__main__':
     radars_to_use_by_date = {}
     radars_for_subbatch = {}
     dates_for_subbatch = {}
-    for i, subbatch in enumerate(subbatches):
+    for i, (_, subbatch) in enumerate(subbatches.iterrows()):
         radar_search_area = shapely.geometry.box(
             subbatch['x_min'] - r_max,
             subbatch['y_min'] - r_max,
@@ -225,9 +247,9 @@ if __name__ == '__main__':
         radars_for_subbatch[i] = radar_sites[[radar_search_area.contains(p) for p in radar_sites['proj_geom']]]['siteID']
         dates_for_subbatch[i] = np.unique([
             t.floor('D') for t in [
-                analysis_time - vol_search_interval,
-                analysis_time,
-                analysis_time + vol_search_interval
+                subbatch['analysis_time'] - vol_search_interval,
+                subbatch['analysis_time'],
+                subbatch['analysis_time'] + vol_search_interval
             ]
         ])
         for date in dates_for_subbatch[i]:
@@ -240,10 +262,10 @@ if __name__ == '__main__':
         for radar_id in radars_to_use_by_date[date]:
             s3_search = s3.list_objects_v2(
                 Bucket=bucket_name,
-                Prefix=date.strftime(f"%Y/%m/%d/{site_id}")
+                Prefix=date.strftime(f"%Y/%m/%d/{radar_id}")
             )
             if 'Contents' not in s3_search:
-                warnings.warn(date.strftime(f"No files found for {site_id} on %Y-%m-%d"))
+                warnings.warn(date.strftime(f"No files found for {radar_id} on %Y-%m-%d"))
                 continue
             s3_key_lists[(date, radar_id)] = [
                 obj['Key'] for obj in s3_search['Contents']
@@ -251,26 +273,23 @@ if __name__ == '__main__':
 
     # Now, filter the lists for just the radars and times needed
     file_keys = []
-    for i, subbatch in enumerate(subbatches):
-        analysis_time = subbatch['analysis_time']
+    for i, (_, subbatch) in enumerate(subbatches.iterrows()):
+        analysis_time = subbatch['analysis_time'].tz_convert(None)
         for date, radar_id in product(dates_for_subbatch[i], radars_for_subbatch[i]):
-            for f in s3_key_lists[(date, radar_id)]:
-                match = l2_datetime_pattern.search(f)
-                if match and (
-                    analysis_time - vol_search_interval
-                    <= pd.Timestamp("{Y}-{m}-{d}T{H}:{M}:{S}".format(**match.groupdict()))
-                    <= analysis_time + vol_search_interval
-                ):
-                    file_keys.append((i, radar_id, f))
+            try:
+                for f in s3_key_lists[(date, radar_id)]:
+                    match = l2_datetime_pattern.search(f)
+                    if match and (
+                        analysis_time - vol_search_interval
+                        <= pd.Timestamp("{Y}-{m}-{d}T{H}:{M}:{S}".format(**match.groupdict()))
+                        <= analysis_time + vol_search_interval
+                    ):
+                        file_keys.append((i, radar_id, f))
+            except KeyError:
+                # None found!
+                continue
     
     # Submit downloads to client
-    def download_nexrad_file(file_key):
-        s3 = boto3.client('s3')
-        f = temp_l2_dir + file_key.split("/")[-1]
-        if not os.path.isfile(f):
-            log.info(f"Downloading {f}")
-            s3.download_file(bucket_name, file_key, f)
-        return f
     nexrad_files_all = client.map(download_nexrad_file, [tup[2] for tup in file_keys], priority=1)
 
     ######################
@@ -278,7 +297,8 @@ if __name__ == '__main__':
     ######################
     print("\nStarting primary subbatch loop...see Dask dashboard...\n")
     datasets = []
-    for i, subbatch in enumerate(subbatches):
+    radar_sites_no_geo = pd.DataFrame(radar_sites[['x', 'y']])
+    for i, (_, subbatch) in enumerate(subbatches.iterrows()):
         # Create gridder
         g = Gridder(cf_attrs, nz=24, dz=1000., z_min=1000.)
         g.assign_from_subbatch_and_spacing(subbatch, 2000.)
@@ -292,7 +312,7 @@ if __name__ == '__main__':
         ])
 
         # Predefine radar subgrids
-        g.prepare_radar_subgrids(set(nexrad_site_ids), radar_sites, r_max)
+        g.prepare_radar_subgrids(set(nexrad_site_ids), radar_sites_no_geo, r_max)
 
         # Go from nexrad file on disk to 4D subgrid at analysis time (extra dim is fields)
         fields = ['reflectivity']
@@ -314,7 +334,7 @@ if __name__ == '__main__':
             g.grid_params,
             g.cf_attrs,
             subbatch['analysis_time'],
-            *subgrid_data_and_weight_futures,
+            *subgrid_data_and_weights_futures,
             priority=3
         )
 
@@ -338,7 +358,7 @@ if __name__ == '__main__':
         
         output = xr.concat(
             [
-                ds['reflectivity'].sel(
+                ds.sel(
                     y=np.arange(y_report - 3.2e4, y_report + 3.2e4, 2000),
                     x=np.arange(x_report - 3.2e4, x_report + 3.2e4, 2000),
                     method='nearest'

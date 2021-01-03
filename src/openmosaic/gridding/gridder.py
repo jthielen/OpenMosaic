@@ -268,12 +268,6 @@ class Gridder:
 
     """
 
-    cache_dir = "/tmp/"
-    grid_params = {}
-
-    # Control params
-    r_max = 3.0e5
-
     def __init__(self, cf_projection, **grid_params):
         """Set up Gridder by defining grid.
 
@@ -295,7 +289,9 @@ class Gridder:
 
         """
         self.cf_attrs = dict(cf_projection)
-        self.crs = pyproj.CRS.from_cf(self.cf_attrs)
+        self.cache_dir = "/tmp/"
+        self.grid_params = {}
+        self.r_max = 3.0e5
 
         self._assign_grid_params('x', {k: v for k, v in grid_params.items() if k in _grid_param_labels_x})
         self._assign_grid_params('y', {k: v for k, v in grid_params.items() if k in _grid_param_labels_y})
@@ -398,20 +394,24 @@ class Gridder:
         self.subgrid_params = {}
         for radar_id in radar_site_ids:
             # Get radar location
-            radar_info = radar_sites[radar_id]
-            radar_location = radar_info['proj_geom']
+            radar_info = radar_sites.loc[radar_id]
+            radar_location_x = radar_info['x']
+            radar_location_y = radar_info['y']
 
             # Prepare naive subgrid for this radar
             subgrid_params = self.round_grid_params({
-                'x_min': radar_location.x - r_max,
-                'x_max': radar_location.x + r_max,
+                'x_min': radar_location_x - r_max,
+                'x_max': radar_location_x + r_max,
                 'dx': self.grid_params['dx'],
-                'y_min': radar_location.y - r_max,
-                'y_max': radar_location.y + r_max,
+                'nx': None,
+                'y_min': radar_location_y - r_max,
+                'y_max': radar_location_y + r_max,
                 'dy': self.grid_params['dy'],
+                'ny': None,
                 'z_min': self.grid_params['z_min'],
                 'z_max': self.grid_params['z_max'],
-                'dz': self.grid_params['dz']
+                'dz': self.grid_params['dz'],
+                'nz': None
             })
 
             # Intersect with overall grid
@@ -424,15 +424,21 @@ class Gridder:
             subgrid_params['xi_min'] = int(
                 (subgrid_params['x_min'] - self.grid_params['x_min']) / self.grid_params['dx']
             )
-            subgrid_params['xi_max'] = subgrid_params['xi_min'] + subgrid_params['nx']
+            subgrid_params['xi_max'] = int(
+                (subgrid_params['x_max'] - self.grid_params['x_min']) / self.grid_params['dx']
+            ) + 1
+            subgrid_params['nx'] = subgrid_params['xi_max'] - subgrid_params['xi_min']
             subgrid_params['yi_min'] = int(
                 (subgrid_params['y_min'] - self.grid_params['y_min']) / self.grid_params['dy']
             )
-            subgrid_params['yi_max'] = subgrid_params['yi_min'] + subgrid_params['ny']
+            subgrid_params['yi_max'] = int(
+                (subgrid_params['y_max'] - self.grid_params['y_min']) / self.grid_params['dy']
+            ) + 1
+            subgrid_params['ny'] = subgrid_params['yi_max'] - subgrid_params['yi_min']
 
             # Save other info
-            subgrid_params['x_radar'] = radar_location.x
-            subgrid_params['y_radar'] = radar_location.y
+            subgrid_params['x_radar'] = radar_location_x
+            subgrid_params['y_radar'] = radar_location_y
 
             # Save result
             self.subgrid_params[radar_id] = subgrid_params
@@ -445,7 +451,7 @@ class Gridder:
         sweep_interval,
         analysis_time=None,
         weighting_function='GridRad',
-        gatefilters=False,
+        gatefilter=False,
         map_roi=False,
         roi_func='dist_beam',
         constant_roi=None,
@@ -468,13 +474,13 @@ class Gridder:
         # Read and filter radar file #
         ##############################
         try:
-            radar = pyart.io.read_nexrad_archive(f)
+            radar = pyart.io.read_nexrad_archive(nexrad_file_path)
         except:
             warnings.warn(f"Cannot read file {nexrad_file_path}")
             return None
 
         sweep_time_offsets = [np.median(radar.time['data'][s:e]) for s, e in radar.iter_start_end()]
-        sweep_times = cftime.num2date(sweep_time_offsets, radar.time['units'])
+        sweep_times = num2date(sweep_time_offsets, radar.time['units'])
         valid_sweep_ids = [
             i for i, t in enumerate(sweep_times) if (
                 analysis_time - sweep_interval
@@ -497,7 +503,7 @@ class Gridder:
             'lat_0': radar.latitude['data'].item(),
             'lon_0': radar.longitude['data'].item()
         }
-        gate_dest_x, date_dest_y = radar_coords_to_grid_coords(
+        gate_dest_x, gate_dest_y = radar_coords_to_grid_coords(
             radar.gate_x['data'],
             radar.gate_y['data'],
             site_id=radar_id,
@@ -515,11 +521,11 @@ class Gridder:
         # Arguments
         filter_kwargs = {} if filter_kwargs is None else filter_kwargs
         cy_weighting_function = _determine_cy_weighting_func(weighting_function)
-        offsets = (
+        offsets = [(
             radar.altitude['data'].item(),
             self.subgrid_params[radar_id]['y_radar'],
             self.subgrid_params[radar_id]['x_radar']
-        )
+        )]
         roi_func_args = (
             roi_func,
             constant_roi,
