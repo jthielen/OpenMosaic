@@ -9,12 +9,14 @@ _map_gates_to_subgrid.pyx, which more directly reuses Py-ART code).
 """
 
 from time import sleep
+import logging
 from pathlib import Path
 from joblib import dump, load
 import warnings
 
 from cftime import num2date
 import numpy as np
+import pyart
 from pyart.core.radar import Radar
 from pyart.filters import GateFilter, moment_based_gate_filter
 import pyproj
@@ -30,6 +32,8 @@ from .vendored import (
     _parse_roi_func
 )
 
+
+log = logging.getLogger(__name__)
 
 _grid_param_labels_z = ['nz', 'dz', 'z_min', 'z_max']
 _grid_param_labels_y = ['ny', 'dy', 'y_min', 'y_max']
@@ -270,7 +274,7 @@ class Gridder:
     # Control params
     r_max = 3.0e5
 
-    def __init__(self, cf_projection, pool=None, **grid_params):
+    def __init__(self, cf_projection, **grid_params):
         """Set up Gridder by defining grid.
 
         Parameters
@@ -292,7 +296,6 @@ class Gridder:
         """
         self.cf_attrs = dict(cf_projection)
         self.crs = pyproj.CRS.from_cf(self.cf_attrs)
-        self.pool = pool
 
         self._assign_grid_params('x', {k: v for k, v in grid_params.items() if k in _grid_param_labels_x})
         self._assign_grid_params('y', {k: v for k, v in grid_params.items() if k in _grid_param_labels_y})
@@ -391,55 +394,218 @@ class Gridder:
 
         return grid_params
 
-    def prepare_radars(self, radars, radar_coords, cache_dir=None, r_max=3.0e5):
-        """Determine gate coordinates and subgrids on which to map each radar.
+    def prepare_radar_subgrids(self, radar_site_ids, radar_sites, r_max=3.0e5):
+        self.subgrid_params = {}
+        for radar_id in radar_site_ids:
+            # Get radar location
+            radar_info = radar_sites[radar_id]
+            radar_location = radar_info['proj_geom']
 
-        Parameters
-        ----------
-        radars : iterable of pyart.core.radar.Radar
-            Collection of (already subsetted by sweep time and range) Py-ART Radar objects
-        radar_coords : iterable of tuple
-            List of x,y coord pairs (in projection) defining radar location
-        cache_dir : str
-            Path to cache directory (used to save coord transform regression models for each
-            radar site)
+            # Prepare naive subgrid for this radar
+            subgrid_params = self.round_grid_params({
+                'x_min': radar_location.x - r_max,
+                'x_max': radar_location.x + r_max,
+                'dx': self.grid_params['dx'],
+                'y_min': radar_location.y - r_max,
+                'y_max': radar_location.y + r_max,
+                'dy': self.grid_params['dy'],
+                'z_min': self.grid_params['z_min'],
+                'z_max': self.grid_params['z_max'],
+                'dz': self.grid_params['dz']
+            })
 
-        """
-        if cache_dir is not None:
-            self.cache_dir = cache_dir
+            # Intersect with overall grid
+            subgrid_params['x_min'] = max(subgrid_params['x_min'], self.grid_params['x_min'])
+            subgrid_params['x_max'] = min(subgrid_params['x_max'], self.grid_params['x_max'])
+            subgrid_params['y_min'] = max(subgrid_params['y_min'], self.grid_params['y_min'])
+            subgrid_params['y_max'] = min(subgrid_params['y_max'], self.grid_params['y_max'])
 
-        if self.pool is None:
-            self.radars = []
-            for i, radar in enumerate(radars):
-                self.radars.append(
-                    prepare_single_radar(
-                        i,
-                        radar,
-                        radar_coords,
-                        self.grid_params,
-                        r_max,
-                        self.cf_attrs,
-                        self.cache_dir
-                    )
-                )
-        else:
-            self.radars = list(
-                self.pool.starmap(
-                    prepare_single_radar,
-                    (
-                        (
-                            i,
-                            radar,
-                            radar_coords,
-                            self.grid_params,
-                            r_max,
-                            self.cf_attrs,
-                            self.cache_dir
-                        )
-                        for i, radar in enumerate(radars)
-                    )
-                )
+            # Go back and compute indexes
+            subgrid_params['xi_min'] = int(
+                (subgrid_params['x_min'] - self.grid_params['x_min']) / self.grid_params['dx']
             )
+            subgrid_params['xi_max'] = subgrid_params['xi_min'] + subgrid_params['nx']
+            subgrid_params['yi_min'] = int(
+                (subgrid_params['y_min'] - self.grid_params['y_min']) / self.grid_params['dy']
+            )
+            subgrid_params['yi_max'] = subgrid_params['yi_min'] + subgrid_params['ny']
+
+            # Save other info
+            subgrid_params['x_radar'] = radar_location.x
+            subgrid_params['y_radar'] = radar_location.y
+
+            # Save result
+            self.subgrid_params[radar_id] = subgrid_params
+
+    def process_nexrad_file_to_subgrids_and_weights(
+        self,
+        nexrad_file_path,
+        radar_id,
+        fields,
+        sweep_interval,
+        analysis_time=None,
+        weighting_function='GridRad',
+        gatefilters=False,
+        map_roi=False,
+        roi_func='dist_beam',
+        constant_roi=None,
+        z_factor=0.05,
+        xy_factor=0.02,
+        min_radius=500.0,
+        h_factor=1.0,
+        nb=1.5,
+        bsp=1.0,
+        filter_kwargs=None,
+        cache_dir=None
+    ):
+        """Do basically everything for a single radar file.
+
+        Read the file, filter for sweeps, calcuate coordinates, and map to subgrid.
+        
+        PARAMETERS TODO.
+        """
+        ##############################
+        # Read and filter radar file #
+        ##############################
+        try:
+            radar = pyart.io.read_nexrad_archive(f)
+        except:
+            warnings.warn(f"Cannot read file {nexrad_file_path}")
+            return None
+
+        sweep_time_offsets = [np.median(radar.time['data'][s:e]) for s, e in radar.iter_start_end()]
+        sweep_times = cftime.num2date(sweep_time_offsets, radar.time['units'])
+        valid_sweep_ids = [
+            i for i, t in enumerate(sweep_times) if (
+                analysis_time - sweep_interval
+                <= t
+                <= analysis_time + sweep_interval
+            )
+        ]
+        if valid_sweep_ids:
+            radar = radar.extract_sweeps(valid_sweep_ids)
+        else:
+            log.info(f"File {nexrad_file_path} does not contain valid sweep times")
+            del radar
+            return None
+
+        #############################
+        # Compute Radar Coordinates #
+        #############################
+        crs_kwargs = {
+            'proj': 'aeqd',
+            'lat_0': radar.latitude['data'].item(),
+            'lon_0': radar.longitude['data'].item()
+        }
+        gate_dest_x, date_dest_y = radar_coords_to_grid_coords(
+            radar.gate_x['data'],
+            radar.gate_y['data'],
+            site_id=radar_id,
+            radar_crs_kwargs=crs_kwargs,
+            target_crs_cf_attrs=self.cf_attrs,
+            wait_for_cache=False,  # TODO validate assumption
+            cache_dir=self.cache_dir
+        )
+        gate_dest_z = radar.gate_altitude['data']
+
+        ##################
+        # Map to Subgrid #
+        ##################
+        
+        # Arguments
+        filter_kwargs = {} if filter_kwargs is None else filter_kwargs
+        cy_weighting_function = _determine_cy_weighting_func(weighting_function)
+        offsets = (
+            radar.altitude['data'].item(),
+            self.subgrid_params[radar_id]['y_radar'],
+            self.subgrid_params[radar_id]['x_radar']
+        )
+        roi_func_args = (
+            roi_func,
+            constant_roi,
+            z_factor,
+            xy_factor,
+            min_radius,
+            h_factor,
+            nb,
+            bsp,
+            offsets
+        )
+        nfields = len(fields)
+
+        # Subgrid setup
+        subgrid_shape = (
+            self.grid_params['nz'],
+            self.subgrid_params[radar_id]['ny'],
+            self.subgrid_params[radar_id]['nx'],
+            nfields
+        )
+        subgrid_starts = (
+            self.grid_params['z_min'],
+            self.subgrid_params[radar_id]['y_min'],
+            self.subgrid_params[radar_id]['x_min']
+        )
+        subgrid_steps = (
+            self.grid_params['dz'],
+            self.grid_params['dy'],
+            self.grid_params['dx'],
+        ) 
+
+        # Copy field data and masks
+        field_shape = (radar.nrays, radar.ngates, nfields)
+        field_data = np.empty(field_shape, dtype='float32')
+        field_mask = np.empty(field_shape, dtype='uint8')
+        for i, field in enumerate(fields):
+            fdata = radar.fields[field]['data']
+            field_data[:, :, i] = np.ma.getdata(fdata)
+            field_mask[:, :, i] = np.ma.getmaskarray(fdata)
+
+        # Find excluded gates from gatefilter
+        if gatefilter is False:
+            gatefilter = GateFilter(radar)
+        elif gatefilter is None:
+            gatefilter = moment_based_gate_filter(radar, **filter_kwargs)
+        excluded_gates = gatefilter.gate_excluded.astype('uint8')
+
+        # Range and offsets
+        gate_range = radar.range['data'].astype('float32')
+        if analysis_time is None:
+            gate_timedelta = np.zeros(radar.nrays, dtype='float32')
+        else:
+            gate_timedelta = np.array([
+                (t - analysis_time.replace(tzinfo=None)).total_seconds()
+                for t in num2date(radar.time['data'], radar.time['units'])
+            ], dtype='float32')
+
+        # Apply low-level map_gates_to_subgrid
+        subgrid = map_gates_to_subgrid(
+            subgrid_shape,
+            subgrid_starts,
+            subgrid_steps,
+            field_shape,
+            field_data,
+            field_mask,
+            excluded_gates,
+            gate_dest_z,
+            gate_dest_y,
+            gate_dest_x,
+            gate_range,
+            gate_timedelta,
+            self.grid_params['z_max'],
+            roi_func_args,
+            cy_weighting_function
+        )
+
+        # Inject subgrid info and return
+        return {
+            **subgrid,
+            **self.subgrid_params[radar_id],
+            'field_metadata': {
+                field: {
+                    k: v for k, v in radar.fields[field].items() if k in ['units', 'standard_name', 'long_name']
+                } for field in fields
+            }
+        }
 
     def map_gates_to_grid(
         self,
