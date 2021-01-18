@@ -474,13 +474,17 @@ class Gridder:
         # Read and filter radar file #
         ##############################
         try:
-            radar = pyart.io.read_nexrad_archive(nexrad_file_path)
+            radar = pyart.io.read_nexrad_archive(nexrad_file_path, delay_field_loading=True)
         except:
             warnings.warn(f"Cannot read file {nexrad_file_path}")
             return None
 
         sweep_time_offsets = [np.median(radar.time['data'][s:e]) for s, e in radar.iter_start_end()]
-        sweep_times = num2date(sweep_time_offsets, radar.time['units'])
+        try:
+            sweep_times = num2date(sweep_time_offsets, radar.time['units'])
+        except:
+            warnings.warn(f"Cannot read valid sweep times from file {nexrad_file_path}")
+            return None
         valid_sweep_ids = [
             i for i, t in enumerate(sweep_times) if (
                 analysis_time - sweep_interval
