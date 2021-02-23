@@ -14,7 +14,7 @@ from pathlib import Path
 from joblib import dump, load
 import warnings
 
-from cftime import num2pydate
+from cftime import num2date
 import numpy as np
 import pyart
 from pyart.core.radar import Radar
@@ -481,7 +481,7 @@ class Gridder:
 
         sweep_time_offsets = [np.median(radar.time['data'][s:e]) for s, e in radar.iter_start_end()]
         try:
-            sweep_times = num2pydate(sweep_time_offsets, radar.time['units'])
+            sweep_times = num2date(sweep_time_offsets, radar.time['units'])
         except:
             warnings.warn(f"Cannot read valid sweep times from file {nexrad_file_path}")
             return None
