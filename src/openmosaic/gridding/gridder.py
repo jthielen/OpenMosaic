@@ -473,6 +473,8 @@ class Gridder:
         ##############################
         # Read and filter radar file #
         ##############################
+        if nexrad_file_path is None:
+            return None
         try:
             radar = pyart.io.read_nexrad_archive(nexrad_file_path, delay_field_loading=True)
         except:
@@ -493,7 +495,11 @@ class Gridder:
             )
         ]
         if valid_sweep_ids:
-            radar = radar.extract_sweeps(valid_sweep_ids)
+            try:
+                radar = radar.extract_sweeps(valid_sweep_ids)
+            except:
+                log.info(f"File {nexrad_file_path} encountered a sweep extraction error")
+                return None
         else:
             log.info(f"File {nexrad_file_path} does not contain valid sweep times")
             del radar
