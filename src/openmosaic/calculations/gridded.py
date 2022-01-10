@@ -3,6 +3,8 @@
 # SPDX-License-Identifier: Apache-2.0
 """Radar field calculations to be applied post-gridding."""
 
+import numba
+import numpy as np
 import xarray as xr
 
 
@@ -12,6 +14,8 @@ class BaseGridCalculation:
         pass
 
     def check_data(self, data):
+        # TODO: add docstring
+        # TODO: add check for altitude increasing order
         if (
             not isinstance(data, xr.Dataset) or "altitude" not in data.coords
             or "altitude" not in data.dims
@@ -77,9 +81,146 @@ class LayerMaximum(BaseGridCalculation):
                 data[f"{label}_{field}"] = data[field].sel(
                     altitude=slice(layer_min, layer_max)
                 ).max('altitude')
+                # TODO: attribute handling
 
         if self.drop:
             data = data.drop_vars(self.fields)            
 
         return data
 
+
+class EchoTopHeight(BaseGridCalculation):
+    # TODO: docstring
+
+    def __init__(self, field='reflectivity', threshold=18, label='echo_top_height'):
+        self.field = field
+        self.threshold = threshold
+        self.label = label
+
+    def __call__(self, data):
+        # TODO: docstring
+        self.check_data(data)
+
+        data[self.label] = xr.apply_ufunc(
+            _echo_top_height, data[self.field], data['altitude'], dask='parallized',
+            input_core_dims=[['altitude']], kwargs={'axis': -1, 'threshold': self.threshold}
+        )
+        # TODO: attrs
+
+        return data
+
+
+def _echo_top_height(reflectivity, height, threshold, axis):
+    # TODO: docstring
+    out_shape = list(reflectivity.shape)
+    del out_shape[axis]
+    out = np.empty(out_shape, dtype=reflectivity.dtype)
+    _echo_top_height_numba(reflectivity, height, out, threshold=threshold, axis=axis)
+    return out
+
+
+@numba.guvectorize('(n),(n)->()', nopython=True)
+def _echo_top_height_numba(reflectivity, height, out, *, threshold=18):
+    # TODO docstring
+    out = np.nan
+    if reflectivity[-1] >= threshold:
+        # If our top of grid is above threshold, that's the height
+        out = height[-1]
+    else:
+        # Otherwise, step down through column
+        for i in range(len(reflectivity) - 1, 0, -1):
+            if reflectivity[i - 1] >= threshold:
+                # Once we hit threshold, get interpolated height
+                out = (
+                    height[i] * (reflectivity[i - 1] - threshold)
+                    + height[i - 1] * (threshold - reflectivity[i])
+                ) / (reflectivity[i - 1] - reflectivity[i])
+
+
+class SHI(BaseGridCalculation):
+    # TODO: docstring
+
+    def __init__(
+        self, analysis_data, reflectivity_field='reflectivity', label='severe_hail_index'
+    ):
+        self.analysis_loader = analysis_data
+        self.reflectivity_field = reflectivity_field
+        self.label = label
+
+    def _check_and_load_matching(self, data):
+        self.check_data(data)
+        return (
+            self.analysis_loader.get_like("altitude_at_freezing_level", data),
+            self.analysis_loader.get_like("altitude_at_-20degC_surface", data)
+        )
+
+    def __call__(self, data):
+        melting_altitude, m20_altitude = self._check_and_load_matching(data)
+
+        data[self.label] = xr.apply_ufunc(
+            _shi, data[self.reflectivity_field], data['altitude'], melting_altitude,
+            m20_altitude, dask='parallized', input_core_dims=[['altitude']],
+            kwargs={'axis': -1, 'threshold': self.threshold}
+        )
+        # TODO: attrs
+
+        return data
+
+
+class MESH(SHI):
+    # TODO: docstring
+
+    def __init__(
+        self, analysis_data, reflectivity_field='reflectivity',
+        label='maximum_estimated_size_of_hail'
+    ):
+        super().__init__(analysis_data, reflectivity_field=reflectivity_field, label=label)
+
+    def __call__(self, data):
+        melting_altitude, m20_altitude = self._check_and_load_matching(data)
+
+        data[self.label] = xr.apply_ufunc(
+            _mesh, data[self.reflectivity_field], data['altitude'], melting_altitude,
+            m20_altitude, dask='parallized', input_core_dims=[['altitude']],
+            kwargs={'axis': -1, 'threshold': self.threshold}
+        )
+        # TODO: attrs
+
+        return data
+
+
+def _shi(reflectivity, height, melting_altitude, m20_altitude, axis):
+    # TODO: docstring
+    out_shape = list(melting_altitude.shape)
+    storm_top_height = np.empty(out_shape, dtype=reflectivity.dtype)
+    out = np.empty(out_shape, dtype=reflectivity.dtype)
+    _echo_top_height_numba(reflectivity, height, storm_top_height, axis=axis)
+    _shi_numba(
+        reflectivity, height, storm_top_height, melting_altitude, m20_altitude, out, axis=axis
+    )
+    return out
+
+
+def _mesh(reflectivity, height, melting_altitude, m20_altitude, axis):
+    return np.sqrt(_shi(reflectivity, height, melting_altitude, m20_altitude, axis))
+
+
+@numba.guvectorize('(n),(n),(),(),()->()', nopython=True)
+def _shi_numba(reflectivity, height, storm_top_height, melting_altitude, m20_altitude, out):
+    # Calculate W_Z (which has branches)
+    W_Z = (reflectivity - 40.0) / 10.0
+    W_Z[reflectivity <= 40] = 0.0
+    W_Z[reflectivity >= 50] = 1.0
+
+    # Calculate E_dot
+    E_dot = 5e-6 * np.power(10, 0.084 * reflectivity) * W_Z
+
+    # Calculate W_T_H_T
+    if storm_top_height <= melting_altitude:
+        W_T_H_T = 0.0
+    elif storm_top_height >= m20_altitude:
+        W_T_H_T = 1.0
+    else:
+        W_T_H_T = (storm_top_height - melting_altitude) / (m20_altitude - melting_altitude)
+
+    out = 0.1 * W_T_H_T * np.trapz(E_dot, x=height)
