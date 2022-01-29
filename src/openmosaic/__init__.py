@@ -2,5 +2,3 @@
 # Distributed under the terms of the Apache License, Version 2.0.
 # SPDX-License-Identifier: Apache-2.0
 """NEXRAD mosaic creation and feature extraction."""
-
-from .routines import hello_world
