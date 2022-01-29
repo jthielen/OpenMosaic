@@ -3,8 +3,6 @@
 # SPDX-License-Identifier: Apache-2.0
 """Grid definitions and transforms along with regridding utils."""
 
-import cartopy.crs as ccrs
-from metpy.plots.mapping import CFProjection
 import numpy as np
 import pyproj
 import xarray as xr
@@ -66,7 +64,7 @@ def generate_rectangular_grid(nx, ny, dx, dy, cf_attrs, x0=None, y0=None):
     xarray.Dataset
         Dataset describing grid, following CF Conventions
     """
-    crs = CFProjection(cf_attrs).to_cartopy()
+    proj = pyproj.Proj(pyproj.CRS.from_cf(cf_attrs))
     if x0 is None or y0 is None:
         x0 = -(nx - 1) / 2 * dx
         y0 = -(ny - 1) / 2 * dy
@@ -75,9 +73,7 @@ def generate_rectangular_grid(nx, ny, dx, dy, cf_attrs, x0=None, y0=None):
     x = np.arange(nx) * dx + x0
     y = np.arange(ny) * dy + y0
     xx, yy = np.meshgrid(x, y)
-    lonlats = ccrs.PlateCarree().transform_points(crs, xx, yy)
-    lon = lonlats[..., 0]
-    lat = lonlats[..., 1]
+    lon, lat = proj(xx, yy, inverse=True)
 
     # Create Dataset
     ds = xr.Dataset(
