@@ -1,7 +1,7 @@
-# Copyright (c) 2020 OpenMosaic Developers.
+# Copyright (c) 2022 OpenMosaic Developers.
 # Distributed under the terms of the Apache License, Version 2.0.
 # SPDX-License-Identifier: Apache-2.0
-"""Grid definitions and transforms along with regridding utils."""
+"""Utils for working with grid coordinates."""
 
 import numpy as np
 import pyproj
