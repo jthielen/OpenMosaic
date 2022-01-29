@@ -1,7 +1,0 @@
-#!/usr/bin/env python
-# Copyright (c) 2020 OpenMosaic Developers.
-# Distributed under the terms of the Apache License, Version 2.0.
-# SPDX-License-Identifier: Apache-2.0
-"""Process batches from queued database."""
-
-print("To be built in order to process...")
