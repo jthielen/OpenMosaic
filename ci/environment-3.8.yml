@@ -18,3 +18,5 @@ dependencies:
     - isort>=5.0.7
     - fsspec
     - s3fs
+    - mypy_extensions >= 0.4.2
+    - aiohttp
