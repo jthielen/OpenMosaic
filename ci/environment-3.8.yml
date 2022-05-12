@@ -8,7 +8,7 @@ dependencies:
     - xarray>=0.15.1
     - pandas>=1.0
     - zarr>=2.4
-    - arm_pyart>=1.11.1
+    - arm_pyart>=1.12.2
     - wradlib>=1.7.3
     - requests>=0.24.0
     - dask>=2.20.0
@@ -16,3 +16,5 @@ dependencies:
     - flake8>=3.8.3
     - black>=19.9
     - isort>=5.0.7
+    - fsspec
+    - s3fs

@@ -1,7 +1,10 @@
 # Copyright (c) 2021 OpenMosaic Developers.
 # Distributed under the terms of the Apache License, Version 2.0.
 # SPDX-License-Identifier: Apache-2.0
-"""Loading functionality for data on AWS S3."""
+"""Loading functionality for data on AWS S3.
+
+TODO: basically redo entirely to use fsspec instead
+"""
 
 import logging
 import os
