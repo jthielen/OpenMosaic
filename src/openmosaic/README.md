@@ -106,3 +106,10 @@ Phase 5) Wait
 ...wait...
 
 ...then, boom, it's mid-August and another academic year begins!
+
+### Miscellaneous In-Progress Notes
+
+#### Code formatting
+
+- using blue, with line length modified to 95
+- not yet run, will wait for old code to be cleared out first

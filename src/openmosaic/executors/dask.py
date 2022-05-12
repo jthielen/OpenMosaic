@@ -8,7 +8,10 @@ developers. Used with modification under the terms of the Apache-2.0 license (se
 full text of license). Modifications (to-date) entail docstring/comment modifications only,
 all functional code is taken as-is from pangeo-forge-recipes.
 
-TODO: update docstrings to NumPy conventions as with remainder of OpenMosaic
+TODO:
+    - update docstrings to NumPy conventions as with remainder of OpenMosaic
+    - handle pipeline nesting (probably while using Dask futures interface rather than
+      HighLevelGraph)
 """
 
 from __future__ import annotations

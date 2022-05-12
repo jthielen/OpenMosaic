@@ -6,7 +6,7 @@
 Inspired by pangeo-forge.
 
 TODO: recipes to create
-    - BaseMosaicRecipe (everything in common)
+    - CommonMosaicRecipe (everything in common)
     - XarrayMosaicRecipe (output to single, in-memory xarray.Dataset)
     - ZarrMosaicRecipe (append to a Zarr store)
     - MultifileMosaicRecipe (for each time, dump a file according to a Path pattern)
