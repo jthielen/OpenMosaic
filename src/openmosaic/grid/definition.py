@@ -13,7 +13,14 @@ attrs_to_use = {'units', 'standard_name', 'long_name'}
 
 
 class GridDefinition:
-    """TODO"""
+    """TODO: basically everything...also may need to reconsider how subgrids are handled
+
+    NEED TO ADD:
+        - simplified (class method to just set bare minimum of grid specifications, and let
+          rest be auto-determined by what radar data is input)
+    
+    
+    """
 
     def __init__(self) -> None:
         # TODO

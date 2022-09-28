@@ -3,8 +3,14 @@
 # SPDX-License-Identifier: Apache-2.0
 """Underlying numerical routines for MRMS-style linear-least squares derivative moments.
 
-TODO: refactor to share with DVAD-LLSD approach(es) as well.
-      also docstrings
+TODO:
+- Docstrings
+- While it would be nice to share implementation with the DVAD-LLSD approach(es), there are
+  enough "line-by-line" differences that, unless you got really (read *too*) clever, they
+  are better left separate.
+    - That being said, if you generalize kernel handling over course of research, then there
+      may end up being more overlap.
+- Carry over masking/missing data handling from DVAD-LLSD once implemented
 """
 
 import numba
@@ -13,7 +19,7 @@ import numpy as np
 
 # LLSD
 @numba.njit()
-def azi_shear_local_linalg(radar_field, weights, m, n, r, r_delta, azi_delta):
+def llsd_local(radar_field, weights, m, n, r, r_delta, azi_delta):
     # init accumulating terms (M and Y from LLSD eq 8 corrected, adj(M) eq 10)
     terms = np.zeros((3, 3))
     sum_w_r_u = 0.0
@@ -49,11 +55,13 @@ def azi_shear_local_linalg(radar_field, weights, m, n, r, r_delta, azi_delta):
     Y = np.array([sum_w_r_u, sum_w_theta_u, sum_w_u])
     X = np.linalg.solve(terms, Y)
 
-    return X[0]
+    return X
 
 
 @numba.njit()
-def azi_shear_llsd(vel_field, range_2d, azi_2d, azi_width=2500, r_depth=750, azi_max_rays=51):
+def llsd_global_shared(
+    component, vel_field, range_2d, azi_2d, azi_width, r_depth, azi_max_rays
+):
     out = np.full_like(vel_field, np.nan)
     for nray in range(1, out.shape[0] - 1):
         azi_delta_1d = np.mod(azi_2d[nray + 1] - azi_2d[nray - 1], 2 * np.pi) / 2    
@@ -99,6 +107,20 @@ def azi_shear_llsd(vel_field, range_2d, azi_2d, azi_width=2500, r_depth=750, azi
                 r[ngate],
                 r_delta,
                 -azi_delta
-            )
+            )[component]
     
     return out
+
+
+@numba.njit()
+def azi_shear_llsd(vel_field, range_2d, azi_2d, azi_width=2500, r_depth=750, azi_max_rays=51):
+    return llsd_global_shared(
+        0, vel_field, range_2d, azi_2d, azi_width, r_depth, azi_max_rays
+    )
+
+
+@numba.njit()
+def rad_div_llsd(vel_field, range_2d, azi_2d, azi_width=750, r_depth=1500, azi_max_rays=51):
+    return llsd_global_shared(
+        1, vel_field, range_2d, azi_2d, azi_width, r_depth, azi_max_rays
+    )

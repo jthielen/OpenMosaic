@@ -1,5 +1,196 @@
 # Development Notes
 
+## September 2022 Development Sprint
+
+### High-Level API Planning
+
+#### Brainstorming
+
+##### Usage Templates
+
+**Rankine Vortex Test**
+
+- Create a rankine vortex
+- Compute rVd, MRMS-AziShear, and GridRad-AziShear in radar coords
+- Grid to an automatically determined 2D grid
+- Compute DVAD-LLSD-Quasi-Vorticity in gridded coords
+- Have a nice output dataset comparing three methods for AziShear-like field in gridded space
+
+```python
+from openmosaic import generate_mosaic
+from openmosaic.calculations import DvadLlsd, Llsd, SmoothedDerivatives
+from openmosaic.grid import GridDefinition
+from openmosaic.testing import rankine_simulate
+
+ds_radar = rankine_simulate(
+    7.5e2, 30, 3.0e4, 3.6e4, 2.0e4, 2.6e4, delta_cartesian=1e2
+)
+target_grid = GridDefinition.simplified(dx=3.0e2, dy=3.0e2)
+ds_gridded = generate_mosaic(
+    ds_radar,
+    grid=target_grid,
+    time=None,
+    fields=None,
+    radar_compute_fields=[
+        DvadLlsd(prefix='dvad_llsd_').compute_rvd,
+        Llsd(
+            azimuthal_shear=True,
+            radial_divergence=False,
+            prefix='llsd_'
+        ),
+        SmoothedDerivatives(
+            azimuthal_shear=True,
+            radial_divergence=False,
+            prefix='gridrad_'
+        )
+    ],
+    subgrid_compute_fields=[DvadLlsd(prefix='dvad_llsd_', drop=True).vorticity_from_rvd],
+    grid_compute_fields=None
+)
+```
+
+**CONUS NEXRAD Snapshot**
+
+- Set a time
+- Use a standard grid
+- Just have composite reflectivity
+
+```python
+from openmosaic import generate_mosaic
+from openmosaic.calculations import LayerMaximum
+from openmosaic.grid.standard import Conus2km
+from openmosaic.patterns import NexradS3
+
+time = '2020-08-10 16:00Z'
+ds_gridded = generate_mosaic(
+    NexradS3,
+    grid=Conus2km,
+    time=time,
+    fields=['reflectivity'],
+    grid_compute_fields=[LayerMaximum(fields=['reflectivity'], prefix='composite_', drop=True)]
+)
+```
+
+**Replicate GridRad for some interval of time**
+
+- Specify times
+- Prepare a recipe-ready pattern for given times and grid from a generic pattern (this should
+  solve what S3 files should be requested and organize them for subgrid gridding and mosaicing)
+- Define the recipe from prepared pattern and mosaic control options (following kwargs of
+  generate_mosaic previously)
+- Run the recipe using desired executor
+
+```python
+from openmosaic.calculations.diagnostics import GridRadDiagnostics
+from openmosaic.grid.standard import GridRadv4p2
+from openmosaic.patterns import NexradS3
+from openmosaic.recipes import ZarrMosaicRecipe
+
+times = pd.date_range('2022-06-01', '2022-07-01', freq='H')
+prepared_pattern = NexradS3.prepare_from_grid(time=times, grid=GridRadv4p2)
+recipe = ZarrMosaicRecipe(
+    prepared_pattern,
+    mosaic_options={
+        'grid': GridRadv4p2,
+        'fields': ['reflectivity', 'spectrum_width'],
+        'diagnostics': [GridRadDiagnostics(nradobs=True, nradecho=True)]
+    },
+    # TODO: specify zarr output compression in place of compression-by-gathering, which
+    # doesn't stack, etc.
+)
+
+recipe.to_dask()
+```
+
+#### Process Outline
+
+##### General steps
+
+(for each time)
+
+1) Load radar data (and compute needed metadata)
+2) Perform radar-space calculations (if any; e.g. velocity dealiasing, LLSD AziShear)
+3) Grid volume(s) from single radar to intermediate subgrid
+4) Perform subgrid/Cartesian-space calculations (if any; e.g., DVAD-LLSD Vorticity)
+5) Reduce subgrid to parent grid resolution (if refined)
+6) Merge subgrids across space
+7) Perform full grid calculations (e.g., echo tops)
+8) Save result
+
+##### Simplfied steps
+
+**Single Time**
+
+(same as general, but without time-loop)
+
+**Single Radar**
+
+1) Load radar data (and compute needed metadata)
+2) Perform radar-space calculations (if any; e.g. velocity dealiasing, LLSD AziShear)
+3) Grid volume(s) from single radar to grid
+4) Perform grid calculations (if any; e.g., DVAD-LLSD Vorticity, echo tops, coarsening)
+5) Save result
+
+##### Options/Control of Process
+
+- Data Input
+    - Options:
+        - xradar object
+        - callable returning an xradar object
+        - some form of datatime & NEXRAD location specification
+- Mosaic Specification
+    - Output grid definition
+    - Intermediate subgrid control
+- Calculations
+
+#### API Outline
+
+- `calculations`
+- `core`
+- `executors`
+- `geo`
+- `grid`
+- `patterns`
+- `recipes`
+- `testing`
+- `storage`
+
+### Misc Notes
+
+- `testing` has a MetPy dependency now
+
+
+### Early-On Reflection
+
+So...summer 2022 plans did *not* go well at all given personal health issues and all that. Here's to hoping that September can be when things turn around.
+
+Not really sure how to get back into all this, except just scattershot and plow through the list of things that need to be done for this to be a useable package, with four main targets in mind:
+
+- Make the demonstrations/executable notebook preprint of my DVAD-LLSD work really slick and seamless
+- Provide easy-to-use tooling for Gallus's group's project
+- Finally deliver on goals from sponsored funding from Haberlie group
+- Have documentation sufficient for a JOSS submission for OpenMosaic
+
+Since it's foremost on my mind, I kind of want to start out by folding back in the components of my DVAD-LLSD stuff.
+
+**Somewhat Later Goals**:
+
+- Revisit `core/_gridding/_PENDING_REMOVAL*` files and verify that all functionality used there has been re-implemented via Numba elsewhere in `core/_gridding/`
+- Build a simple OSSE test workflow ("true" field, detect with simple fake radar, gridding and calcs, compare with original)
+- Implement unit tests of all the stuff that's "local" (no remote data loading, no workflow integration tests yet)
+
+**More Later Goals**:
+
+- Revisit the "generate full CONUS NEXRAD mosaic for given time" use case and verify that all the "plumbing" works for it
+- Investigate test coverage and go through plans to have it all fully covered
+- Make sure public API documentation is complete
+- Document "rough edges" features (capabilities designed for, but not fully worked out in initial release version)
+    - Also roadmap for incomplete or unimplemented features
+- Document basic use cases supported by initial release
+- Actually release it on conda-forge, etc.
+
+--------------------------------------------------------------------------
+
 ## May 2022 Development Sprint
 
 ### New "Code Plan"
@@ -62,6 +253,7 @@ Other first-level modules not previously
 - Support for gridding methodologies other than GridRad-style nearest-neighbor (such as Cressman/Barnes, variational, or a port of whatever LROSE uses)
 - Getting your azishear/raddiv implementations pushed upstream to PyART or in their own package (as they might be useful outside of the context of mosaicing?)
 - Directly engaging the pangeo-forge folks to say "here's what I'm trying to do, like a modification on pangeo-forge's approach, can we discuss refactoring pangeo-forge-recipes so it can be extended by downstream users making similar data pipelines with more esoteric needs"
+- More advanced dealias algo support (including fetching of analysis profiles or obs soundings or linking to previous volumes)
 
 ### Target Goals/Timeline
 
@@ -108,6 +300,19 @@ Phase 5) Wait
 ...then, boom, it's mid-August and another academic year begins!
 
 ### Miscellaneous In-Progress Notes
+
+#### Up Next
+
+**Immediate**
+
+- Refactor the DaskPipelineExecutor to use futures interface and allow nested Pipelines
+- Revisit the recipe stack (top down this time) to make the class structure work out best
+
+**Later, but still in mind**
+
+- Get rid of all the `_PENDING_REMOVAL_` files (i.e., verify that all such code is adequately incorporated elsewhere)
+- Brainstorm how your calculation framework interfaces with recipe framework
+- Implement an RDA-friendly fsspec interface
 
 #### Code formatting
 

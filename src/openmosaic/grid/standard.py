@@ -1,9 +1,11 @@
 # Copyright (c) 2022 OpenMosaic Developers.
 # Distributed under the terms of the Apache License, Version 2.0.
 # SPDX-License-Identifier: Apache-2.0
-"""Sample data generators for testing and demonstration purposes.
+"""Standard GridDefinition instances for easy reuse.
 
-TODO: figure out public API
+TODO:
+
+- Conus2km
+- MrmsConusCoarse
+- GridRadv4p2
 """
-
-from .rankine import rankine_simulate
