@@ -9,7 +9,6 @@ TODO: actually implement, rather than spec-ing out
 
 def generate_mosaic(
     *inputs,
-    *,
     grid,
     time=None,
     fields=None,

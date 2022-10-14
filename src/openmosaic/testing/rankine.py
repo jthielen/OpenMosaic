@@ -7,11 +7,13 @@ TODO: refactor for better api and to build in noisy field
       also add docstrings
 """
 
-import metpy.calc as mpcalc
 import numba
 from numba import float64
 import numpy as np
 import xarray as xr
+
+import metpy.calc as mpcalc
+from metpy.units import units
 
 
 @numba.vectorize([float64(float64, float64)], nopython=True)

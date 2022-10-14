@@ -67,6 +67,7 @@ def dvad_llsd_local(velocity_field, x_field, y_field, weights, x_center, y_cente
 def dvad_llsd_neighborhood_solve_polar(
     nray, ngate, vel_field, x_2d, y_2d, neighborhood_radius, max_rays, range_delta
 ):
+    null_return = np.full(3, np.nan)
     # Center
     x_center = x_2d[nray, ngate]
     y_center = y_2d[nray, ngate]
@@ -79,7 +80,7 @@ def dvad_llsd_neighborhood_solve_polar(
     # March in azimuth to find bound
     within_j_bounds = True
     for j in range(1, max_rays // 2):
-        if nray + j >= out.shape[0]:
+        if nray + j >= vel_field.shape[0]:
             within_j_bounds = False
             break
         neighborhood_distance = np.hypot(x_2d[nray + j] - x_center, y_2d[nray + j] - y_center)
@@ -87,13 +88,13 @@ def dvad_llsd_neighborhood_solve_polar(
             # this is outer bound...if not, continue until next
             break
     if not within_j_bounds:
-        continue
+        return null_return
     j_min = nray - j + 1
     j_max = nray + j
     
     # secondary bound check
-    if i_min < 0 or j_min < 0 or i_max > out.shape[1] or j_max > out.shape[0]:
-        continue
+    if i_min < 0 or j_min < 0 or i_max > vel_field.shape[1] or j_max > vel_field.shape[0]:
+        return null_return
         
     # Calculate weights from circle
     neighborhood_distance = np.hypot(x_2d[j_min:j_max, i_min:i_max] - x_center, y_2d[j_min:j_max, i_min:i_max] - y_center)

@@ -99,7 +99,7 @@ def llsd_global_shared(
                 continue
 
             # Calculate value
-            out[nray, ngate] = azi_shear_local_linalg(
+            out[nray, ngate] = llsd_local(
                 vel_field[j_min:j_max, i_min:i_max],
                 np.ones((n, m)),
                 m,
